@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mastodon Poster</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+      color: #6366f1;
+    }
+    .card {
+      background: #16213e;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    }
+    .card h2 {
+      font-size: 1.2rem;
+      margin-bottom: 15px;
+      color: #6366f1;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 0.9rem;
+      color: #aaa;
+    }
+    input, textarea, select {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #0f0f23;
+      color: #eee;
+      font-size: 1rem;
+      margin-bottom: 15px;
+    }
+    input:focus, textarea:focus, select:focus {
+      outline: none;
+      border-color: #6366f1;
+    }
+    textarea {
+      min-height: 150px;
+      resize: vertical;
+    }
+    .char-counter {
+      text-align: right;
+      font-size: 0.85rem;
+      color: #888;
+      margin-top: -10px;
+      margin-bottom: 15px;
+    }
+    .char-counter.warning {
+      color: #f59e0b;
+    }
+    .char-counter.error {
+      color: #ef4444;
+    }
+    button {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-primary {
+      background: #6366f1;
+      color: white;
+    }
+    .btn-primary:not(:disabled):hover {
+      background: #4f46e5;
+    }
+    .status {
+      padding: 15px;
+      border-radius: 8px;
+      margin-top: 15px;
+      display: none;
+    }
+    .status.success {
+      background: #064e3b;
+      border: 1px solid #059669;
+      display: block;
+    }
+    .status.error {
+      background: #450a0a;
+      border: 1px solid #dc2626;
+      display: block;
+    }
+    .status a {
+      color: #6ee7b7;
+      text-decoration: underline;
+    }
+    .row {
+      display: flex;
+      gap: 15px;
+    }
+    .row > * {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Mastodon Poster</h1>
+
+    <!-- Settings Card -->
+    <div class="card">
+      <h2>Instance Settings</h2>
+      <label for="instance">Mastodon Instance</label>
+      <input type="text" id="instance" placeholder="mastodon.social">
+
+      <label for="token">Access Token</label>
+      <input type="password" id="token" placeholder="Generate in Settings → Development">
+
+      <button class="btn-primary" id="saveBtn">Save Settings</button>
+    </div>
+
+    <!-- Posting Card -->
+    <div class="card">
+      <h2>Create Toot</h2>
+      <label for="status">What's happening?</label>
+      <textarea id="status" placeholder="What's on your mind?" maxlength="600"></textarea>
+      <div class="char-counter" id="charCounter">0/500</div>
+
+      <label for="visibility">Visibility</label>
+      <select id="visibility">
+        <option value="public">Public - Show on public timeline</option>
+        <option value="unlisted">Unlisted - Don't show on public timeline</option>
+        <option value="private">Private - Only show to followers</option>
+      </select>
+
+      <button class="btn-primary" id="tootBtn" disabled>Toot!</button>
+
+      <div class="status" id="status" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <script>
+    const MAX_CHARS = 500;
+    const STORAGE_KEYS = {
+      INSTANCE: 'mastodon-instance',
+      TOKEN: 'mastodon-token'
+    };
+
+    // DOM elements
+    const instanceInput = document.getElementById('instance');
+    const tokenInput = document.getElementById('token');
+    const statusInput = document.getElementById('status');
+    const charCounter = document.getElementById('charCounter');
+    const visibilitySelect = document.getElementById('visibility');
+    const tootBtn = document.getElementById('tootBtn');
+    const statusDiv = document.getElementById('status');
+
+    // Load saved settings on page load
+    function loadSettings() {
+      const savedInstance = localStorage.getItem(STORAGE_KEYS.INSTANCE);
+      const savedToken = localStorage.getItem(STORAGE_KEYS.TOKEN);
+      if (savedInstance) instanceInput.value = savedInstance;
+      if (savedToken) tokenInput.value = savedToken;
+    }
+
+    // Save settings to localStorage
+    function saveSettings() {
+      const instance = instanceInput.value.trim();
+      const token = tokenInput.value.trim();
+
+      if (!instance) {
+        showStatus('Please enter an instance URL', 'error');
+        return;
+      }
+      if (!token) {
+        showStatus('Please enter an access token', 'error');
+        return;
+      }
+
+      localStorage.setItem(STORAGE_KEYS.INSTANCE, instance);
+      localStorage.setItem(STORAGE_KEYS.TOKEN, token);
+      showStatus('Settings saved!', 'success');
+    }
+
+    // Update character counter and button state
+    function updateCharCounter() {
+      const length = statusInput.value.length;
+      charCounter.textContent = `${length}/${MAX_CHARS}`;
+
+      charCounter.className = 'char-counter';
+      if (length > MAX_CHARS) {
+        charCounter.classList.add('error');
+      } else if (length > MAX_CHARS - 50) {
+        charCounter.classList.add('warning');
+      }
+
+      tootBtn.disabled = length === 0 || length > MAX_CHARS;
+    }
+
+    // Show status message
+    function showStatus(message, type) {
+      statusDiv.textContent = message;
+      statusDiv.className = 'status ' + type;
+    }
+
+    // Show status message with a link
+    function showStatusWithLink(message, url, type) {
+      statusDiv.textContent = message;
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = url;
+      statusDiv.appendChild(link);
+      statusDiv.className = 'status ' + type;
+    }
+
+    // Post toot to Mastodon
+    async function postToot() {
+      const instance = localStorage.getItem(STORAGE_KEYS.INSTANCE);
+      const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+      const status = statusInput.value.trim();
+      const visibility = visibilitySelect.value;
+
+      if (!instance || !token) {
+        showStatus('Please configure instance settings first', 'error');
+        return;
+      }
+
+      tootBtn.disabled = true;
+      tootBtn.textContent = 'Posting...';
+
+      try {
+        const response = await fetch('/api/toot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            instance,
+            token,
+            status,
+            visibility
+          })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          showStatusWithLink('Toot posted! View at: ', data.url, 'success');
+          statusInput.value = '';
+          updateCharCounter();
+        } else {
+          showStatus(`Error: ${data.error}`, 'error');
+        }
+      } catch (error) {
+        showStatus(`Network error: ${error.message}`, 'error');
+      } finally {
+        tootBtn.disabled = false;
+        tootBtn.textContent = 'Toot!';
+      }
+    }
+
+    // Event listeners
+    statusInput.addEventListener('input', updateCharCounter);
+    document.getElementById('saveBtn').addEventListener('click', saveSettings);
+    tootBtn.addEventListener('click', postToot);
+    loadSettings();
+  </script>
+</body>
+</html>
