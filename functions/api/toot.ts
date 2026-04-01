@@ -48,15 +48,24 @@ export async function onRequestPost({ request }: { request: Request }): Promise<
       }),
     });
 
-    const responseData: any = await mastodonResponse.json();
-
     if (!mastodonResponse.ok) {
+      const errorText = await mastodonResponse.text();
+      let errorMessage = 'Failed to post toot';
+
+      try {
+        const errorData = JSON.parse(errorText);
+        errorMessage = errorData.error || errorMessage;
+      } catch {
+        errorMessage = errorText || errorMessage;
+      }
+
       return Response.json(
-        { error: responseData.error || 'Failed to post toot' },
+        { error: errorMessage },
         { status: mastodonResponse.status, headers }
       );
     }
 
+    const responseData = await mastodonResponse.json();
     return Response.json(responseData, { headers });
 
   } catch (error) {

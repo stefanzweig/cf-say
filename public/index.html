@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mastodon Poster</title>
+  <title>Stefan Shouts</title>
   <style>
     * {
       box-sizing: border-box;
@@ -12,8 +12,8 @@
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #1a1a2e;
-      color: #eee;
+      background: #f5f5f5;
+      color: #333;
       min-height: 100vh;
       padding: 20px;
     }
@@ -27,36 +27,42 @@
       color: #6366f1;
     }
     .card {
-      background: #16213e;
+      background: #fff;
       border-radius: 12px;
       padding: 20px;
       margin-bottom: 20px;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     }
     .card h2 {
       font-size: 1.2rem;
       margin-bottom: 15px;
       color: #6366f1;
     }
+    .card.centered {
+      margin-left: auto;
+      margin-right: auto;
+      max-width: 500px;
+    }
     label {
       display: block;
       margin-bottom: 5px;
       font-size: 0.9rem;
-      color: #aaa;
+      color: #666;
     }
     input, textarea, select {
       width: 100%;
       padding: 12px;
-      border: 1px solid #333;
+      border: 1px solid #ddd;
       border-radius: 8px;
-      background: #0f0f23;
-      color: #eee;
+      background: #fafafa;
+      color: #333;
       font-size: 1rem;
       margin-bottom: 15px;
     }
     input:focus, textarea:focus, select:focus {
       outline: none;
       border-color: #6366f1;
+      background: #fff;
     }
     textarea {
       min-height: 150px;
@@ -76,8 +82,7 @@
       color: #ef4444;
     }
     button {
-      width: 100%;
-      padding: 14px;
+      padding: 14px 20px;
       border: none;
       border-radius: 8px;
       font-size: 1rem;
@@ -96,6 +101,12 @@
     .btn-primary:not(:disabled):hover {
       background: #4f46e5;
     }
+    .btn-small {
+      padding: 8px 16px;
+      font-size: 0.85rem;
+      width: auto;
+      display: inline-block;
+    }
     .status {
       padding: 15px;
       border-radius: 8px;
@@ -103,46 +114,71 @@
       display: none;
     }
     .status.success {
-      background: #064e3b;
+      background: #d1fae5;
       border: 1px solid #059669;
       display: block;
     }
     .status.error {
-      background: #450a0a;
+      background: #fee2e2;
       border: 1px solid #dc2626;
       display: block;
     }
     .status a {
-      color: #6ee7b7;
+      color: #059669;
       text-decoration: underline;
     }
-    .row {
-      display: flex;
-      gap: 15px;
+
+    /* Config button in bottom right corner */
+    .config-btn-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 1000;
     }
-    .row > * {
-      flex: 1;
+    .config-btn-container .btn-primary {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    /* Settings panel (hidden by default) */
+    .settings-panel {
+      position: fixed;
+      bottom: 80px;
+      right: 20px;
+      width: 320px;
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      z-index: 999;
+      display: none;
+    }
+    .settings-panel.visible {
+      display: block;
+    }
+    .settings-panel h2 {
+      font-size: 1.1rem;
+      margin-bottom: 15px;
+      color: #6366f1;
+    }
+    .settings-panel label {
+      font-size: 0.85rem;
+    }
+    .settings-panel input {
+      padding: 10px;
+      font-size: 0.9rem;
+      margin-bottom: 12px;
+    }
+    .settings-panel .btn-primary {
+      width: 100%;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Mastodon Poster</h1>
-
-    <!-- Settings Card -->
-    <div class="card">
-      <h2>Instance Settings</h2>
-      <label for="instance">Mastodon Instance</label>
-      <input type="text" id="instance" placeholder="mastodon.social">
-
-      <label for="token">Access Token</label>
-      <input type="password" id="token" placeholder="Generate in Settings → Development">
-
-      <button class="btn-primary" id="saveBtn">Save Settings</button>
-    </div>
+    <h1>Stefan Shouts</h1>
 
     <!-- Posting Card -->
-    <div class="card">
+    <div class="card centered">
       <h2>Create Toot</h2>
       <label for="status">What's happening?</label>
       <textarea id="status" placeholder="What's on your mind?" maxlength="600"></textarea>
@@ -161,11 +197,30 @@
     </div>
   </div>
 
+  <!-- Config Button (bottom right) -->
+  <div class="config-btn-container">
+    <button class="btn-primary btn-small" id="configBtn">⚙️ Settings</button>
+  </div>
+
+  <!-- Settings Panel -->
+  <div class="settings-panel" id="settingsPanel">
+    <h2>Instance Settings</h2>
+    <label for="instance">Mastodon Instance</label>
+    <input type="text" id="instance" placeholder="mastodon.social">
+
+    <label for="token">Access Token</label>
+    <input type="password" id="token" placeholder="Generate in Settings → Development">
+
+    <button class="btn-primary" id="saveBtn">Save Settings</button>
+  </div>
+
   <script>
     const MAX_CHARS = 500;
+    const DUPLICATE_WINDOW_MS = 30000; // 30 seconds
     const STORAGE_KEYS = {
       INSTANCE: 'mastodon-instance',
-      TOKEN: 'mastodon-token'
+      TOKEN: 'mastodon-token',
+      LAST_TOOT: 'mastodon-last-toot'
     };
 
     // DOM elements
@@ -176,6 +231,13 @@
     const visibilitySelect = document.getElementById('visibility');
     const tootBtn = document.getElementById('tootBtn');
     const statusDiv = document.getElementById('status');
+    const configBtn = document.getElementById('configBtn');
+    const settingsPanel = document.getElementById('settingsPanel');
+
+    // Toggle settings panel
+    configBtn.addEventListener('click', () => {
+      settingsPanel.classList.toggle('visible');
+    });
 
     // Load saved settings on page load
     function loadSettings() {
@@ -183,6 +245,11 @@
       const savedToken = localStorage.getItem(STORAGE_KEYS.TOKEN);
       if (savedInstance) instanceInput.value = savedInstance;
       if (savedToken) tokenInput.value = savedToken;
+
+      // Show settings panel only if no token saved
+      if (!savedToken) {
+        settingsPanel.classList.add('visible');
+      }
     }
 
     // Save settings to localStorage
@@ -202,6 +269,7 @@
       localStorage.setItem(STORAGE_KEYS.INSTANCE, instance);
       localStorage.setItem(STORAGE_KEYS.TOKEN, token);
       showStatus('Settings saved!', 'success');
+      settingsPanel.classList.remove('visible');
     }
 
     // Update character counter and button state
@@ -219,13 +287,20 @@
       tootBtn.disabled = length === 0 || length > MAX_CHARS;
     }
 
-    // Show status message
+    // Show status message (for settings panel)
     function showStatus(message, type) {
       statusDiv.textContent = message;
       statusDiv.className = 'status ' + type;
+
+      // Auto-hide success message after 2 seconds
+      if (type === 'success') {
+        setTimeout(() => {
+          statusDiv.style.display = 'none';
+        }, 2000);
+      }
     }
 
-    // Show status message with a link
+    // Show status message with a link (for main card)
     function showStatusWithLink(message, url, type) {
       statusDiv.textContent = message;
       const link = document.createElement('a');
@@ -237,6 +312,34 @@
       statusDiv.className = 'status ' + type;
     }
 
+    // Clear main status div
+    function clearMainStatus() {
+      statusDiv.textContent = '';
+      statusDiv.className = 'status';
+    }
+
+    // Check if content was posted recently
+    function checkDuplicate(content) {
+      const lastToot = localStorage.getItem(STORAGE_KEYS.LAST_TOOT);
+      if (!lastToot) return false;
+
+      const { content: lastContent, timestamp } = JSON.parse(lastToot);
+      const now = Date.now();
+
+      if (now - timestamp < DUPLICATE_WINDOW_MS && lastContent === content) {
+        return true;
+      }
+      return false;
+    }
+
+    // Save last toot
+    function saveLastToot(content) {
+      localStorage.setItem(STORAGE_KEYS.LAST_TOOT, JSON.stringify({
+        content,
+        timestamp: Date.now()
+      }));
+    }
+
     // Post toot to Mastodon
     async function postToot() {
       const instance = localStorage.getItem(STORAGE_KEYS.INSTANCE);
@@ -246,6 +349,12 @@
 
       if (!instance || !token) {
         showStatus('Please configure instance settings first', 'error');
+        return;
+      }
+
+      // Check for duplicate content
+      if (checkDuplicate(status)) {
+        showStatus('Duplicate content! You posted the same thing within the last 30 seconds.', 'error');
         return;
       }
 
@@ -268,6 +377,7 @@
 
         if (response.ok) {
           showStatusWithLink('Toot posted! View at: ', data.url, 'success');
+          saveLastToot(status);
           statusInput.value = '';
           updateCharCounter();
         } else {
@@ -285,6 +395,14 @@
     statusInput.addEventListener('input', updateCharCounter);
     document.getElementById('saveBtn').addEventListener('click', saveSettings);
     tootBtn.addEventListener('click', postToot);
+
+    // Click outside settings panel to close
+    document.addEventListener('click', (e) => {
+      if (!settingsPanel.contains(e.target) && !configBtn.contains(e.target) && settingsPanel.classList.contains('visible')) {
+        settingsPanel.classList.remove('visible');
+      }
+    });
+
     loadSettings();
   </script>
 </body>
