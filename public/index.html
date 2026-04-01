@@ -138,7 +138,7 @@
       <label for="token">Access Token</label>
       <input type="password" id="token" placeholder="Generate in Settings → Development">
 
-      <button class="btn-primary" onclick="saveSettings()">Save Settings</button>
+      <button class="btn-primary" id="saveBtn">Save Settings</button>
     </div>
 
     <!-- Posting Card -->
@@ -155,9 +155,9 @@
         <option value="private">Private - Only show to followers</option>
       </select>
 
-      <button class="btn-primary" id="tootBtn" onclick="postToot()" disabled>Toot!</button>
+      <button class="btn-primary" id="tootBtn" disabled>Toot!</button>
 
-      <div class="status" id="status"></div>
+      <div class="status" id="status" aria-live="polite"></div>
     </div>
   </div>
 
@@ -225,6 +225,18 @@
       statusDiv.className = 'status ' + type;
     }
 
+    // Show status message with a link
+    function showStatusWithLink(message, url, type) {
+      statusDiv.textContent = message;
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = url;
+      statusDiv.appendChild(link);
+      statusDiv.className = 'status ' + type;
+    }
+
     // Post toot to Mastodon
     async function postToot() {
       const instance = localStorage.getItem(STORAGE_KEYS.INSTANCE);
@@ -255,7 +267,7 @@
         const data = await response.json();
 
         if (response.ok) {
-          showStatus(`Toot posted! View at: <a href="${data.url}" target="_blank">${data.url}</a>`, 'success');
+          showStatusWithLink('Toot posted! View at: ', data.url, 'success');
           statusInput.value = '';
           updateCharCounter();
         } else {
@@ -271,6 +283,8 @@
 
     // Event listeners
     statusInput.addEventListener('input', updateCharCounter);
+    document.getElementById('saveBtn').addEventListener('click', saveSettings);
+    tootBtn.addEventListener('click', postToot);
     loadSettings();
   </script>
 </body>
