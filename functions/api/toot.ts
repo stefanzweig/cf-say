@@ -48,7 +48,7 @@ export async function onRequestPost({ request }: { request: Request }): Promise<
       }),
     });
 
-    const responseData = await mastodonResponse.json();
+    const responseData: any = await mastodonResponse.json();
 
     if (!mastodonResponse.ok) {
       return Response.json(
