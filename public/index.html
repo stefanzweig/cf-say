@@ -171,6 +171,38 @@
     .settings-panel .btn-primary {
       width: 100%;
     }
+    .settings-panel h3 {
+      font-size: 0.95rem;
+      margin: 15px 0 10px;
+      color: #6366f1;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 8px;
+    }
+
+    /* Checkbox group styling */
+    .checkbox-group {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 15px;
+    }
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: 0.95rem;
+      color: #333;
+      user-select: none;
+    }
+    .checkbox-label input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+      accent-color: #6366f1;
+    }
+    .checkbox-label:hover {
+      color: #6366f1;
+    }
   </style>
 </head>
 <body>
@@ -179,19 +211,32 @@
 
     <!-- Posting Card -->
     <div class="card centered">
-      <h2>Create Toot</h2>
+      <h2>Create Post</h2>
+
+      <label>Post to</label>
+      <div class="checkbox-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="postToMastodon">
+          <span>Mastodon</span>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="postToFanfou">
+          <span>饭否 (Fanfou)</span>
+        </label>
+      </div>
+
       <label for="status">What's happening?</label>
       <textarea id="status" placeholder="What's on your mind?" maxlength="600"></textarea>
       <div class="char-counter" id="charCounter">0/500</div>
 
-      <label for="visibility">Visibility</label>
+      <label for="visibility" id="visibilityLabel">Visibility</label>
       <select id="visibility">
         <option value="public">Public - Show on public timeline</option>
         <option value="unlisted">Unlisted - Don't show on public timeline</option>
         <option value="private">Private - Only show to followers</option>
       </select>
 
-      <button class="btn-primary" id="tootBtn" disabled>Toot!</button>
+      <button class="btn-primary" id="postBtn" disabled>Post!</button>
 
       <div class="status" id="status" aria-live="polite"></div>
     </div>
@@ -204,12 +249,33 @@
 
   <!-- Settings Panel -->
   <div class="settings-panel" id="settingsPanel">
-    <h2>Instance Settings</h2>
-    <label for="instance">Mastodon Instance</label>
-    <input type="text" id="instance" placeholder="mastodon.social">
+    <h2>Settings</h2>
 
-    <label for="token">Access Token</label>
-    <input type="password" id="token" placeholder="Generate in Settings → Development">
+    <!-- Mastodon Settings -->
+    <div id="mastodonSettings">
+      <h3>Mastodon</h3>
+      <label for="instance">Mastodon Instance</label>
+      <input type="text" id="instance" placeholder="mastodon.social">
+
+      <label for="token">Access Token</label>
+      <input type="password" id="token" placeholder="Generate in Settings → Development">
+    </div>
+
+    <!-- Fanfou Settings -->
+    <div id="fanfouSettings">
+      <h3>饭否 (Fanfou)</h3>
+      <label for="consumer_key">Consumer Key</label>
+      <input type="text" id="consumer_key" placeholder="Your consumer key">
+
+      <label for="consumer_secret">Consumer Secret</label>
+      <input type="password" id="consumer_secret" placeholder="Your consumer secret">
+
+      <label for="access_token">Access Token</label>
+      <input type="password" id="access_token" placeholder="Your access token">
+
+      <label for="access_token_secret">Access Token Secret</label>
+      <input type="password" id="access_token_secret" placeholder="Your access token secret">
+    </div>
 
     <button class="btn-primary" id="saveBtn">Save Settings</button>
   </div>
@@ -218,18 +284,32 @@
     const MAX_CHARS = 500;
     const DUPLICATE_WINDOW_MS = 30000; // 30 seconds
     const STORAGE_KEYS = {
-      INSTANCE: 'mastodon-instance',
-      TOKEN: 'mastodon-token',
-      LAST_TOOT: 'mastodon-last-toot'
+      // Mastodon
+      MASTODON_INSTANCE: 'mastodon-instance',
+      MASTODON_TOKEN: 'mastodon-token',
+      // Fanfou
+      FANFOU_CONSUMER_KEY: 'fanfou-consumer-key',
+      FANFOU_CONSUMER_SECRET: 'fanfou-consumer-secret',
+      FANFOU_ACCESS_TOKEN: 'fanfou-access-token',
+      FANFOU_ACCESS_TOKEN_SECRET: 'fanfou-access-token-secret',
+      // Last post
+      LAST_POST: 'last-post'
     };
 
     // DOM elements
+    const postToMastodonCheckbox = document.getElementById('postToMastodon');
+    const postToFanfouCheckbox = document.getElementById('postToFanfou');
     const instanceInput = document.getElementById('instance');
     const tokenInput = document.getElementById('token');
+    const consumerKeyInput = document.getElementById('consumer_key');
+    const consumerSecretInput = document.getElementById('consumer_secret');
+    const fanfouAccessTokenInput = document.getElementById('access_token');
+    const fanfouTokenSecretInput = document.getElementById('access_token_secret');
     const statusInput = document.getElementById('status');
     const charCounter = document.getElementById('charCounter');
     const visibilitySelect = document.getElementById('visibility');
-    const tootBtn = document.getElementById('tootBtn');
+    const visibilityLabel = document.getElementById('visibilityLabel');
+    const postBtn = document.getElementById('postBtn');
     const statusDiv = document.getElementById('status');
     const configBtn = document.getElementById('configBtn');
     const settingsPanel = document.getElementById('settingsPanel');
@@ -241,36 +321,73 @@
 
     // Load saved settings on page load
     function loadSettings() {
-      const savedInstance = localStorage.getItem(STORAGE_KEYS.INSTANCE);
-      const savedToken = localStorage.getItem(STORAGE_KEYS.TOKEN);
-      if (savedInstance) instanceInput.value = savedInstance;
-      if (savedToken) tokenInput.value = savedToken;
+      // Load Mastodon settings
+      const mastodonInstance = localStorage.getItem(STORAGE_KEYS.MASTODON_INSTANCE);
+      const mastodonToken = localStorage.getItem(STORAGE_KEYS.MASTODON_TOKEN);
+      if (mastodonInstance) instanceInput.value = mastodonInstance;
+      if (mastodonToken) tokenInput.value = mastodonToken;
 
-      // Show settings panel only if no token saved
-      if (!savedToken) {
-        settingsPanel.classList.add('visible');
-      }
+      // Load Fanfou settings
+      const fanfouConsumerKey = localStorage.getItem(STORAGE_KEYS.FANFOU_CONSUMER_KEY);
+      const fanfouConsumerSecret = localStorage.getItem(STORAGE_KEYS.FANFOU_CONSUMER_SECRET);
+      const fanfouAccessToken = localStorage.getItem(STORAGE_KEYS.FANFOU_ACCESS_TOKEN);
+      const fanfouTokenSecret = localStorage.getItem(STORAGE_KEYS.FANFOU_ACCESS_TOKEN_SECRET);
+      if (fanfouConsumerKey) consumerKeyInput.value = fanfouConsumerKey;
+      if (fanfouConsumerSecret) consumerSecretInput.value = fanfouConsumerSecret;
+      if (fanfouAccessToken) fanfouAccessTokenInput.value = fanfouAccessToken;
+      if (fanfouTokenSecret) fanfouTokenSecretInput.value = fanfouTokenSecret;
+
+      // Load checkbox states
+      const savedMastodon = localStorage.getItem('postToMastodon');
+      const savedFanfou = localStorage.getItem('postToFanfou');
+      if (savedMastodon === 'true') postToMastodonCheckbox.checked = true;
+      if (savedFanfou === 'true') postToFanfouCheckbox.checked = true;
+
+      updateVisibilityDisplay();
     }
 
     // Save settings to localStorage
     function saveSettings() {
+      // Save Mastodon settings
       const instance = instanceInput.value.trim();
       const token = tokenInput.value.trim();
-
-      if (!instance) {
-        showStatus('Please enter an instance URL', 'error');
-        return;
-      }
-      if (!token) {
-        showStatus('Please enter an access token', 'error');
-        return;
+      if (instance && token) {
+        localStorage.setItem(STORAGE_KEYS.MASTODON_INSTANCE, instance);
+        localStorage.setItem(STORAGE_KEYS.MASTODON_TOKEN, token);
       }
 
-      localStorage.setItem(STORAGE_KEYS.INSTANCE, instance);
-      localStorage.setItem(STORAGE_KEYS.TOKEN, token);
+      // Save Fanfou settings
+      const consumerKey = consumerKeyInput.value.trim();
+      const consumerSecret = consumerSecretInput.value.trim();
+      const accessToken = fanfouAccessTokenInput.value.trim();
+      const tokenSecret = fanfouTokenSecretInput.value.trim();
+      if (consumerKey && consumerSecret && accessToken && tokenSecret) {
+        localStorage.setItem(STORAGE_KEYS.FANFOU_CONSUMER_KEY, consumerKey);
+        localStorage.setItem(STORAGE_KEYS.FANFOU_CONSUMER_SECRET, consumerSecret);
+        localStorage.setItem(STORAGE_KEYS.FANFOU_ACCESS_TOKEN, accessToken);
+        localStorage.setItem(STORAGE_KEYS.FANFOU_ACCESS_TOKEN_SECRET, tokenSecret);
+      }
+
+      // Save checkbox states
+      localStorage.setItem('postToMastodon', postToMastodonCheckbox.checked);
+      localStorage.setItem('postToFanfou', postToFanfouCheckbox.checked);
+
       showStatus('Settings saved!', 'success');
-      settingsPanel.classList.remove('visible');
+      setTimeout(() => {
+        settingsPanel.classList.remove('visible');
+      }, 1500);
     }
+
+    // Update visibility display based on checkbox states
+    function updateVisibilityDisplay() {
+      const anyMastodon = postToMastodonCheckbox.checked;
+      visibilityLabel.style.display = anyMastodon ? 'block' : 'none';
+      visibilitySelect.style.display = anyMastodon ? 'block' : 'none';
+    }
+
+    // Checkbox change listeners
+    postToMastodonCheckbox.addEventListener('change', updateVisibilityDisplay);
+    postToFanfouCheckbox.addEventListener('change', updateVisibilityDisplay);
 
     // Update character counter and button state
     function updateCharCounter() {
@@ -284,7 +401,9 @@
         charCounter.classList.add('warning');
       }
 
-      tootBtn.disabled = length === 0 || length > MAX_CHARS;
+      // Button should be disabled if no checkbox is selected
+      const anyChecked = postToMastodonCheckbox.checked || postToFanfouCheckbox.checked;
+      postBtn.disabled = length === 0 || length > MAX_CHARS || !anyChecked;
     }
 
     // Show status message (for settings panel)
@@ -320,10 +439,10 @@
 
     // Check if content was posted recently
     function checkDuplicate(content) {
-      const lastToot = localStorage.getItem(STORAGE_KEYS.LAST_TOOT);
-      if (!lastToot) return false;
+      const lastPost = localStorage.getItem(STORAGE_KEYS.LAST_POST);
+      if (!lastPost) return false;
 
-      const { content: lastContent, timestamp } = JSON.parse(lastToot);
+      const { content: lastContent, timestamp } = JSON.parse(lastPost);
       const now = Date.now();
 
       if (now - timestamp < DUPLICATE_WINDOW_MS && lastContent === content) {
@@ -332,34 +451,23 @@
       return false;
     }
 
-    // Save last toot
-    function saveLastToot(content) {
-      localStorage.setItem(STORAGE_KEYS.LAST_TOOT, JSON.stringify({
+    // Save last post
+    function saveLastPost(content) {
+      localStorage.setItem(STORAGE_KEYS.LAST_POST, JSON.stringify({
         content,
         timestamp: Date.now()
       }));
     }
 
-    // Post toot to Mastodon
-    async function postToot() {
-      const instance = localStorage.getItem(STORAGE_KEYS.INSTANCE);
-      const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
-      const status = statusInput.value.trim();
-      const visibility = visibilitySelect.value;
+    // Post to Mastodon (returns promise for parallel posting)
+    async function postToMastodonOnly(status, visibility) {
+      const instance = localStorage.getItem(STORAGE_KEYS.MASTODON_INSTANCE);
+      const token = localStorage.getItem(STORAGE_KEYS.MASTODON_TOKEN);
 
       if (!instance || !token) {
-        showStatus('Please configure instance settings first', 'error');
-        return;
+        showStatus('Please configure Mastodon settings first', 'error');
+        return false;
       }
-
-      // Check for duplicate content
-      if (checkDuplicate(status)) {
-        showStatus('Duplicate content! You posted the same thing within the last 30 seconds.', 'error');
-        return;
-      }
-
-      tootBtn.disabled = true;
-      tootBtn.textContent = 'Posting...';
 
       try {
         const response = await fetch('/api/toot', {
@@ -377,24 +485,122 @@
 
         if (response.ok) {
           showStatusWithLink('Toot posted! View at: ', data.url, 'success');
-          saveLastToot(status);
-          statusInput.value = '';
-          updateCharCounter();
+          return true;
         } else {
-          showStatus(`Error: ${data.error}`, 'error');
+          showStatus(`Mastodon Error: ${data.error}`, 'error');
+          return false;
         }
       } catch (error) {
         showStatus(`Network error: ${error.message}`, 'error');
-      } finally {
-        tootBtn.disabled = false;
-        tootBtn.textContent = 'Toot!';
+        return false;
       }
+    }
+
+    // Post to Fanfou (returns promise for parallel posting)
+    async function postToFanfouOnly(status) {
+      const consumerKey = localStorage.getItem(STORAGE_KEYS.FANFOU_CONSUMER_KEY);
+      const consumerSecret = localStorage.getItem(STORAGE_KEYS.FANFOU_CONSUMER_SECRET);
+      const accessToken = localStorage.getItem(STORAGE_KEYS.FANFOU_ACCESS_TOKEN);
+      const tokenSecret = localStorage.getItem(STORAGE_KEYS.FANFOU_ACCESS_TOKEN_SECRET);
+
+      if (!consumerKey || !consumerSecret || !accessToken || !tokenSecret) {
+        showStatus('Please configure Fanfou settings first', 'error');
+        return false;
+      }
+
+      try {
+        const response = await fetch('/api/fanfou', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            consumer_key: consumerKey,
+            consumer_secret: consumerSecret,
+            access_token: accessToken,
+            access_token_secret: tokenSecret,
+            status: status
+          })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          showStatusWithLink('Posted to Fanfou! View at: ', data.uri || 'https://fanfou.com/', 'success');
+          return true;
+        } else {
+          showStatus(`Fanfou Error: ${data.error}`, 'error');
+          return false;
+        }
+      } catch (error) {
+        showStatus(`Network error: ${error.message}`, 'error');
+        return false;
+      }
+    }
+
+    // Main post function - post to selected platforms
+    async function handlePost() {
+      const postToMastodon = postToMastodonCheckbox.checked;
+      const postToFanfou = postToFanfouCheckbox.checked;
+      const status = statusInput.value.trim();
+      const visibility = visibilitySelect.value;
+
+      if (!postToMastodon && !postToFanfou) {
+        showStatus('Please select at least one platform', 'error');
+        return;
+      }
+
+      // Check for duplicate content
+      if (checkDuplicate(status)) {
+        showStatus('Duplicate content! You posted the same thing within the last 30 seconds.', 'error');
+        return;
+      }
+
+      postBtn.disabled = true;
+      postBtn.textContent = 'Posting...';
+      clearMainStatus();
+
+      const results = [];
+
+      // Post to Mastodon if selected
+      if (postToMastodon) {
+        results.push(postToMastodonOnly(status, visibility));
+      }
+
+      // Post to Fanfou if selected
+      if (postToFanfou) {
+        results.push(postToFanfouOnly(status));
+      }
+
+      // Wait for all posts to complete
+      const postResults = await Promise.allSettled(results);
+
+      // Check results
+      let successCount = 0;
+      let errorCount = 0;
+
+      postResults.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value) {
+          successCount++;
+        } else {
+          errorCount++;
+        }
+      });
+
+      // Reset form on success
+      if (successCount > 0) {
+        statusInput.value = '';
+        updateCharCounter();
+      }
+
+      postBtn.disabled = false;
+      postBtn.textContent = 'Post!';
     }
 
     // Event listeners
     statusInput.addEventListener('input', updateCharCounter);
+    postToMastodonCheckbox.addEventListener('change', updateCharCounter);
+    postToFanfouCheckbox.addEventListener('change', updateCharCounter);
     document.getElementById('saveBtn').addEventListener('click', saveSettings);
-    tootBtn.addEventListener('click', postToot);
+    postBtn.addEventListener('click', handlePost);
 
     // Click outside settings panel to close
     document.addEventListener('click', (e) => {
