@@ -123,9 +123,43 @@
       border: 1px solid #dc2626;
       display: block;
     }
+    .status.partial {
+      background: #fef3c7;
+      border: 1px solid #f59e0b;
+      display: block;
+    }
     .status a {
       color: #059669;
       text-decoration: underline;
+    }
+    .platform-status {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .platform-status-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+    .platform-status-item.success {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    .platform-status-item.error {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .platform-status-item.pending {
+      background: #e5e7eb;
+      color: #6b7280;
+    }
+    .platform-icon {
+      font-size: 1.1rem;
     }
 
     /* Config button in bottom right corner */
@@ -238,6 +272,7 @@
 
       <button class="btn-primary" id="postBtn" disabled>Post!</button>
 
+      <div class="platform-status" id="platformStatus" aria-live="polite"></div>
       <div class="status" id="status" aria-live="polite"></div>
     </div>
   </div>
@@ -311,6 +346,7 @@
     const visibilityLabel = document.getElementById('visibilityLabel');
     const postBtn = document.getElementById('postBtn');
     const statusDiv = document.getElementById('status');
+    const platformStatusDiv = document.getElementById('platformStatus');
     const configBtn = document.getElementById('configBtn');
     const settingsPanel = document.getElementById('settingsPanel');
 
@@ -437,6 +473,41 @@
       statusDiv.className = 'status';
     }
 
+    // Update platform status indicator
+    function updatePlatformStatus(platform, status, message, url = null) {
+      const icons = {
+        mastodon: '🐘',
+        fanfou: '📱'
+      };
+      const names = {
+        mastodon: 'Mastodon',
+        fanfou: 'Fanfou'
+      };
+
+      let item = document.getElementById(`platform-${platform}`);
+      if (!item) {
+        item = document.createElement('div');
+        item.id = `platform-${platform}`;
+        item.className = 'platform-status-item';
+        platformStatusDiv.innerHTML = '';
+        platformStatusDiv.appendChild(item);
+      }
+
+      item.className = `platform-status-item ${status}`;
+
+      let content = `<span class="platform-icon">${icons[platform]}</span><span>${names[platform]}: ${message}`;
+      if (url && status === 'success') {
+        content += ` <a href="${url}" target="_blank" rel="noopener noreferrer">查看</a>`;
+      }
+      content += '</span>';
+      item.innerHTML = content;
+    }
+
+    // Clear platform status
+    function clearPlatformStatus() {
+      platformStatusDiv.innerHTML = '';
+    }
+
     // Check if content was posted recently
     function checkDuplicate(content) {
       const lastPost = localStorage.getItem(STORAGE_KEYS.LAST_POST);
@@ -465,7 +536,7 @@
       const token = localStorage.getItem(STORAGE_KEYS.MASTODON_TOKEN);
 
       if (!instance || !token) {
-        showStatus('Please configure Mastodon settings first', 'error');
+        updatePlatformStatus('mastodon', 'error', '请配置 Mastodon 设置');
         return false;
       }
 
@@ -484,14 +555,14 @@
         const data = await response.json();
 
         if (response.ok) {
-          showStatusWithLink('Toot posted! View at: ', data.url, 'success');
+          updatePlatformStatus('mastodon', 'success', 'Mastodon 成功!', data.url);
           return true;
         } else {
-          showStatus(`Mastodon Error: ${data.error}`, 'error');
+          updatePlatformStatus('mastodon', 'error', `Mastodon: ${data.error}`);
           return false;
         }
       } catch (error) {
-        showStatus(`Network error: ${error.message}`, 'error');
+        updatePlatformStatus('mastodon', 'error', `Mastodon: ${error.message}`);
         return false;
       }
     }
@@ -504,7 +575,7 @@
       const tokenSecret = localStorage.getItem(STORAGE_KEYS.FANFOU_ACCESS_TOKEN_SECRET);
 
       if (!consumerKey || !consumerSecret || !accessToken || !tokenSecret) {
-        showStatus('Please configure Fanfou settings first', 'error');
+        updatePlatformStatus('fanfou', 'error', '请配置 Fanfou 设置');
         return false;
       }
 
@@ -524,14 +595,14 @@
         const data = await response.json();
 
         if (response.ok) {
-          showStatusWithLink('Posted to Fanfou! View at: ', data.uri || 'https://fanfou.com/', 'success');
+          updatePlatformStatus('fanfou', 'success', 'Fanfou 成功!', data.uri || 'https://fanfou.com/');
           return true;
         } else {
-          showStatus(`Fanfou Error: ${data.error}`, 'error');
+          updatePlatformStatus('fanfou', 'error', `Fanfou: ${data.error}`);
           return false;
         }
       } catch (error) {
-        showStatus(`Network error: ${error.message}`, 'error');
+        updatePlatformStatus('fanfou', 'error', `Fanfou: ${error.message}`);
         return false;
       }
     }
@@ -557,16 +628,19 @@
       postBtn.disabled = true;
       postBtn.textContent = 'Posting...';
       clearMainStatus();
+      clearPlatformStatus();
 
       const results = [];
 
       // Post to Mastodon if selected
       if (postToMastodon) {
+        updatePlatformStatus('mastodon', 'pending', '发送中...');
         results.push(postToMastodonOnly(status, visibility));
       }
 
       // Post to Fanfou if selected
       if (postToFanfou) {
+        updatePlatformStatus('fanfou', 'pending', '发送中...');
         results.push(postToFanfouOnly(status));
       }
 
@@ -584,6 +658,16 @@
           errorCount++;
         }
       });
+
+      // Show summary message if both platforms are selected and one fails
+      const bothSelected = postToMastodon && postToFanfou;
+      if (bothSelected && errorCount > 0 && successCount > 0) {
+        statusDiv.textContent = '部分平台发送成功，请查看下方状态';
+        statusDiv.className = 'status partial';
+      } else if (errorCount === results.length && results.length > 0) {
+        statusDiv.textContent = '发送失败，请查看下方状态';
+        statusDiv.className = 'status error';
+      }
 
       // Reset form on success
       if (successCount > 0) {
