@@ -161,6 +161,63 @@
     .platform-icon {
       font-size: 1.1rem;
     }
+    .mentions-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .mentions-header h2 {
+      margin-bottom: 0;
+    }
+    .mentions-meta {
+      font-size: 0.85rem;
+      color: #777;
+      margin-bottom: 12px;
+    }
+    .mentions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .mention-item {
+      padding: 12px;
+      border: 1px solid #eee;
+      border-radius: 8px;
+      background: #fafafa;
+    }
+    .mention-item.unread {
+      border-color: #6366f1;
+      background: #eef2ff;
+    }
+    .mention-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+      font-size: 0.9rem;
+    }
+    .mention-platform {
+      color: #6366f1;
+      font-weight: 700;
+    }
+    .mention-time {
+      color: #888;
+      white-space: nowrap;
+      font-size: 0.8rem;
+    }
+    .mention-content {
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .mention-content a {
+      color: #4f46e5;
+    }
+    .mention-empty {
+      color: #777;
+      font-size: 0.95rem;
+    }
 
     /* Config button in bottom right corner */
     .config-btn-container {
@@ -275,6 +332,18 @@
       <div class="platform-status" id="platformStatus" aria-live="polite"></div>
       <div class="status" id="status" aria-live="polite"></div>
     </div>
+
+    <!-- Mentions Card -->
+    <div class="card centered">
+      <div class="mentions-header">
+        <h2>Mentions</h2>
+        <button class="btn-primary btn-small" id="refreshMentionsBtn">Refresh</button>
+      </div>
+      <div class="mentions-meta" id="mentionsMeta">每 10 分钟自动检查一次。请先选择平台并保存对应设置。</div>
+      <div class="mentions-list" id="mentionsList" aria-live="polite">
+        <div class="mention-empty">尚未加载 mentions。</div>
+      </div>
+    </div>
   </div>
 
   <!-- Config Button (bottom right) -->
@@ -328,7 +397,10 @@
       FANFOU_ACCESS_TOKEN: 'fanfou-access-token',
       FANFOU_ACCESS_TOKEN_SECRET: 'fanfou-access-token-secret',
       // Last post
-      LAST_POST: 'last-post'
+      LAST_POST: 'last-post',
+      // Mentions
+      LAST_MASTODON_MENTION_ID: 'last-mastodon-mention-id',
+      LAST_FANFOU_MENTION_ID: 'last-fanfou-mention-id'
     };
 
     // DOM elements
@@ -347,8 +419,13 @@
     const postBtn = document.getElementById('postBtn');
     const statusDiv = document.getElementById('status');
     const platformStatusDiv = document.getElementById('platformStatus');
+    const mentionsMeta = document.getElementById('mentionsMeta');
+    const mentionsList = document.getElementById('mentionsList');
+    const refreshMentionsBtn = document.getElementById('refreshMentionsBtn');
     const configBtn = document.getElementById('configBtn');
     const settingsPanel = document.getElementById('settingsPanel');
+
+    const MENTIONS_CHECK_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
     // Toggle settings panel
     configBtn.addEventListener('click', () => {
@@ -530,6 +607,265 @@
       }));
     }
 
+    function stripHtml(html) {
+      const template = document.createElement('template');
+      template.innerHTML = html || '';
+      return template.content.textContent || template.content.innerText || '';
+    }
+
+    function sanitizeMastodonHtml(html) {
+      const template = document.createElement('template');
+      template.innerHTML = html || '';
+
+      template.content.querySelectorAll('script, style, iframe, object, embed').forEach(node => node.remove());
+      template.content.querySelectorAll('*').forEach(node => {
+        [...node.attributes].forEach(attribute => {
+          const name = attribute.name.toLowerCase();
+          const value = attribute.value.trim().toLowerCase();
+          if (name.startsWith('on') || value.startsWith('javascript:')) {
+            node.removeAttribute(attribute.name);
+          }
+        });
+      });
+
+      return template.innerHTML;
+    }
+
+    function formatMentionTime(value) {
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString();
+    }
+
+    function getMentionSortTime(mention) {
+      const time = new Date(mention.created_at || 0).getTime();
+      return Number.isNaN(time) ? 0 : time;
+    }
+
+    function getLatestMentionIds(results) {
+      const latestIds = {};
+
+      results.forEach(result => {
+        if (!result.mentions || result.mentions.length === 0) return;
+        const newest = [...result.mentions].sort((a, b) => getMentionSortTime(b) - getMentionSortTime(a))[0];
+        if (newest?.id) latestIds[result.platform] = newest.id;
+      });
+
+      return latestIds;
+    }
+
+    function saveLatestMentionIds(latestIds) {
+      if (latestIds.mastodon) {
+        localStorage.setItem(STORAGE_KEYS.LAST_MASTODON_MENTION_ID, latestIds.mastodon);
+      }
+      if (latestIds.fanfou) {
+        localStorage.setItem(STORAGE_KEYS.LAST_FANFOU_MENTION_ID, latestIds.fanfou);
+      }
+    }
+
+    function getUnreadCount(results) {
+      let count = 0;
+
+      results.forEach(result => {
+        const key = result.platform === 'mastodon'
+          ? STORAGE_KEYS.LAST_MASTODON_MENTION_ID
+          : STORAGE_KEYS.LAST_FANFOU_MENTION_ID;
+        const lastSeenId = localStorage.getItem(key);
+        const mentions = result.mentions || [];
+
+        if (!lastSeenId) return;
+
+        for (const mention of mentions) {
+          if (mention.id === lastSeenId) break;
+          count++;
+        }
+      });
+
+      return count;
+    }
+
+    function isUnreadMention(platform, mention, latestIds) {
+      const key = platform === 'mastodon'
+        ? STORAGE_KEYS.LAST_MASTODON_MENTION_ID
+        : STORAGE_KEYS.LAST_FANFOU_MENTION_ID;
+      const lastSeenId = localStorage.getItem(key);
+      return !!lastSeenId && mention.id !== lastSeenId && latestIds[platform] !== lastSeenId;
+    }
+
+    function renderMentions(results, errors = [], latestIds = {}) {
+      mentionsList.innerHTML = '';
+
+      const allMentions = results
+        .flatMap(result => (result.mentions || []).map(mention => ({
+          ...mention,
+          platform: result.platform,
+        })))
+        .sort((a, b) => getMentionSortTime(b) - getMentionSortTime(a));
+
+      if (errors.length > 0) {
+        errors.forEach(error => {
+          const div = document.createElement('div');
+          div.className = 'status error';
+          div.style.display = 'block';
+          div.textContent = error;
+          mentionsList.appendChild(div);
+        });
+      }
+
+      if (allMentions.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'mention-empty';
+        empty.textContent = errors.length > 0 ? '没有可显示的 mentions。' : '暂无 mentions。';
+        mentionsList.appendChild(empty);
+        return;
+      }
+
+      allMentions.forEach(mention => {
+        const platformLabel = mention.platform === 'mastodon' ? '🐘 Mastodon' : '📱 Fanfou';
+        const item = document.createElement('div');
+        item.className = `mention-item ${isUnreadMention(mention.platform, mention, latestIds) ? 'unread' : ''}`;
+
+        const title = document.createElement('div');
+        title.className = 'mention-title';
+
+        const authorSpan = document.createElement('span');
+        const platformSpan = document.createElement('span');
+        platformSpan.className = 'mention-platform';
+        platformSpan.textContent = platformLabel;
+        authorSpan.appendChild(platformSpan);
+        authorSpan.append(` · ${mention.author_name || mention.author_username || 'Unknown'}`);
+
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'mention-time';
+        timeSpan.textContent = formatMentionTime(mention.created_at);
+
+        title.appendChild(authorSpan);
+        title.appendChild(timeSpan);
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'mention-content';
+        if (mention.html) {
+          contentDiv.innerHTML = sanitizeMastodonHtml(mention.html);
+        } else {
+          contentDiv.textContent = stripHtml(mention.text || '');
+        }
+
+        item.appendChild(title);
+        item.appendChild(contentDiv);
+
+        if (mention.url) {
+          const link = document.createElement('a');
+          link.href = mention.url;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = '查看原文';
+          item.appendChild(link);
+        }
+
+        mentionsList.appendChild(item);
+      });
+    }
+
+    async function fetchMastodonMentions() {
+      const instance = localStorage.getItem(STORAGE_KEYS.MASTODON_INSTANCE);
+      const token = localStorage.getItem(STORAGE_KEYS.MASTODON_TOKEN);
+
+      if (!instance || !token) {
+        throw new Error('请配置 Mastodon 设置');
+      }
+
+      const response = await fetch('/api/mastodon-mentions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instance,
+          token,
+          limit: 20
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Mastodon mentions 加载失败');
+      return data;
+    }
+
+    async function fetchFanfouMentions() {
+      const consumerKey = localStorage.getItem(STORAGE_KEYS.FANFOU_CONSUMER_KEY);
+      const consumerSecret = localStorage.getItem(STORAGE_KEYS.FANFOU_CONSUMER_SECRET);
+      const accessToken = localStorage.getItem(STORAGE_KEYS.FANFOU_ACCESS_TOKEN);
+      const tokenSecret = localStorage.getItem(STORAGE_KEYS.FANFOU_ACCESS_TOKEN_SECRET);
+
+      if (!consumerKey || !consumerSecret || !accessToken || !tokenSecret) {
+        throw new Error('请配置 Fanfou 设置');
+      }
+
+      const response = await fetch('/api/fanfou-mentions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          consumer_key: consumerKey,
+          consumer_secret: consumerSecret,
+          access_token: accessToken,
+          access_token_secret: tokenSecret,
+          count: 20
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Fanfou mentions 加载失败');
+      return data;
+    }
+
+    async function checkMentions({ manual = false } = {}) {
+      const tasks = [];
+      const labels = [];
+
+      if (postToMastodonCheckbox.checked) {
+        tasks.push(fetchMastodonMentions());
+        labels.push('Mastodon');
+      }
+
+      if (postToFanfouCheckbox.checked) {
+        tasks.push(fetchFanfouMentions());
+        labels.push('Fanfou');
+      }
+
+      if (tasks.length === 0) {
+        mentionsMeta.textContent = '请选择至少一个平台以检查 mentions。';
+        renderMentions([]);
+        return;
+      }
+
+      refreshMentionsBtn.disabled = true;
+      refreshMentionsBtn.textContent = 'Loading...';
+      mentionsMeta.textContent = `${manual ? '手动' : '自动'}检查中：${labels.join(', ')}...`;
+
+      const settled = await Promise.allSettled(tasks);
+      const results = [];
+      const errors = [];
+
+      settled.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          results.push(result.value);
+        } else {
+          errors.push(`${labels[index]}: ${result.reason.message}`);
+        }
+      });
+
+      const latestIds = getLatestMentionIds(results);
+      const unreadCount = getUnreadCount(results);
+      renderMentions(results, errors, latestIds);
+      saveLatestMentionIds(latestIds);
+
+      const mentionCount = results.reduce((sum, result) => sum + (result.mentions?.length || 0), 0);
+      const now = new Date().toLocaleTimeString();
+      mentionsMeta.textContent = `上次检查：${now} · 共 ${mentionCount} 条 mentions · 新增 ${unreadCount} 条${errors.length ? ` · ${errors.length} 个错误` : ''}`;
+
+      refreshMentionsBtn.disabled = false;
+      refreshMentionsBtn.textContent = 'Refresh';
+    }
+
     // Post to Mastodon (returns promise for parallel posting)
     async function postToMastodonOnly(status, visibility) {
       const instance = localStorage.getItem(STORAGE_KEYS.MASTODON_INSTANCE);
@@ -685,6 +1021,7 @@
     postToFanfouCheckbox.addEventListener('change', updateCharCounter);
     document.getElementById('saveBtn').addEventListener('click', saveSettings);
     postBtn.addEventListener('click', handlePost);
+    refreshMentionsBtn.addEventListener('click', () => checkMentions({ manual: true }));
 
     // Click outside settings panel to close
     document.addEventListener('click', (e) => {
@@ -694,6 +1031,8 @@
     });
 
     loadSettings();
+    checkMentions();
+    setInterval(() => checkMentions(), MENTIONS_CHECK_INTERVAL_MS);
   </script>
 </body>
 </html>
